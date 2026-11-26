@@ -13,7 +13,9 @@ export default async function handler(req, res) {
 
   // GET → تعداد مشترکین (برای نمایش در سایت)
   if (req.method === 'GET') {
-    return res.status(200).json({ count: await count(), configured: isConfigured() });
+    let n = 0;
+    try { n = await count(); } catch { /* دیتابیس در دسترس نیست: صفر صادقانه */ }
+    return res.status(200).json({ count: n, configured: isConfigured() });
   }
 
   if (req.method !== 'POST') {

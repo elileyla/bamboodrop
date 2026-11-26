@@ -18,6 +18,9 @@
 </head>
 <body>
 
+<!-- نوار پیشروی خواندن -->
+<div class="progress" id="progress" aria-hidden="true"></div>
+
 <!-- ===== NAV ===== -->
 <header class="nav" id="nav">
   <div class="container nav__inner">
@@ -31,7 +34,9 @@
       <a href="#faq">سوالات</a>
       <a class="btn btn--sm" href="https://t.me/Bamboodrop" target="_blank" rel="noopener">ورود به کانال</a>
     </nav>
-    <button class="nav__burger" id="burger" aria-label="منو">☰</button>
+    <button class="nav__burger" id="burger" aria-label="منو" aria-expanded="false" aria-controls="navLinks">
+      <span></span><span></span><span></span>
+    </button>
   </div>
 </header>
 
@@ -63,21 +68,28 @@
 <section class="rates" id="rates" hidden>
   <div class="container rates__inner">
     <div class="rates__main">
-      <span class="rates__label">تتر / تومان</span>
+      <img class="rates__icon rates__icon--main" src="/tokens/usdt.svg" alt="تتر" title="تتر / تومان" width="28" height="28" />
       <span class="rates__value" id="rateUsdt">—</span>
       <span class="rates__change" id="rateUsdtChg"></span>
     </div>
     <div class="rates__item">
-      <span class="rates__label">بیتکوین / تتر</span>
+      <img class="rates__icon" src="/tokens/btc.svg" alt="بیتکوین" title="بیتکوین / تتر" width="24" height="24" />
       <span class="rates__value" id="rateBtc">—</span>
       <span class="rates__change" id="rateBtcChg"></span>
     </div>
     <div class="rates__item">
-      <span class="rates__label">اتریوم / تتر</span>
+      <img class="rates__icon" src="/tokens/eth.svg" alt="اتریوم" title="اتریوم / تتر" width="24" height="24" />
       <span class="rates__value" id="rateEth">—</span>
       <span class="rates__change" id="rateEthChg"></span>
     </div>
-    <span class="rates__time" id="ratesTime"></span>
+    <div class="rates__time" id="ratesTime" title="آخرین بهروزرسانی نرخ" hidden>
+      <svg class="rates__time-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
+      <span id="ratesDate" dir="ltr">—</span>
+      <span class="rates__time-dot" aria-hidden="true"></span>
+      <svg class="rates__time-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+      <span id="ratesClock" dir="ltr">—</span>
+      <span class="rates__stale" id="ratesStale" hidden>تأخیر</span>
+    </div>
   </div>
 </section>
 
@@ -89,6 +101,7 @@
         <button class="tab is-active" data-tab="all" role="tab" aria-selected="true">همه</button>
         <button class="tab" data-tab="airdrop" role="tab" aria-selected="false">ایردراپها</button>
         <button class="tab" data-tab="project" role="tab" aria-selected="false">پروژهها</button>
+        <button class="tab" data-tab="ended" role="tab" aria-selected="false">پایان یافته</button>
       </div>
       <div class="board-tools">
         <label class="board-search">
@@ -152,6 +165,9 @@
     <p class="footer__warn">ایردراپها ریسک مالی دارند. مسئولیت هر اقدام با خودتان است.</p>
   </div>
 </footer>
+
+<!-- برگشت به بالا -->
+<button class="to-top" id="toTop" type="button" aria-label="برگشت به بالا" title="بالا">↑</button>
 
 <script src="script.js"></script>
 </body>

@@ -24,15 +24,39 @@ const MIME = {
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
+// یک خطای شبکه نباید سرور محلی را پایین بیاورد
+process.on('unhandledRejection', (err) => log('unhandled rejection |', err?.message || err));
+
 // کش در حافظه (فقط برای توسعه‌ی محلی؛ روی Vercel کش لبه انجام می‌شود)
 let cache = null;
 let cacheTs = 0;
+let inflight = null;
 async function cached() {
   if (cache && Date.now() - cacheTs < CACHE_TTL) return cache;
-  cache = await getData();
-  cacheTs = Date.now();
-  log(`updated | subs=${cache.stats.subscribers} drops=${cache.drops.length}`);
-  return cache;
+  if (inflight) return inflight;            // جلوگیری از درخواستهای موازی به تلگرام
+
+  inflight = (async () => {
+    try {
+      const fresh = await getData();
+      if (fresh.stale && cache) {
+        // منبع در دسترس نیست: کش قبلی را نگه میداریم و زودتر دوباره امتحان میکنیم
+        cacheTs = Date.now() - CACHE_TTL + 15_000;
+        log(`stale | ${fresh.error || 'network'}`);
+        return cache;
+      }
+      cache = fresh;
+      cacheTs = Date.now();
+      log(`updated | subs=${cache.stats.subscribers} drops=${cache.drops.length}`);
+      return cache;
+    } catch (e) {
+      log('update failed |', e?.message || e);
+      if (cache) return cache;
+      throw e;
+    } finally {
+      inflight = null;
+    }
+  })();
+  return inflight;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -60,7 +84,8 @@ const server = http.createServer(async (req, res) => {
       const { default: handler } = await import('./api/prices.js');
       res.status = (c) => { res.statusCode = c; return res; };
       res.json = (o) => send(res.statusCode || 200, o);
-      return handler({ method: req.method }, res);
+      await handler({ method: req.method }, res);
+      return;
     }
     if (url.pathname === '/api/drops') {
       const d = await cached();
@@ -87,7 +112,8 @@ const server = http.createServer(async (req, res) => {
       });
       res.status = (c) => { res.statusCode = c; return res; };
       res.json = (o) => send(res.statusCode || 200, o);
-      return handler({ method: req.method, body, query: Object.fromEntries(url.searchParams), headers: req.headers }, res);
+      await handler({ method: req.method, body, query: Object.fromEntries(url.searchParams), headers: req.headers }, res);
+      return;
     }
 
     // فایل‌های استاتیک از public/ (همان رفتاری که Vercel دارد)

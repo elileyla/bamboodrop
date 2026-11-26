@@ -32,7 +32,8 @@ let state = { tab: 'all', query: '', tag: '' };
 const expanded = new Set();
 
 function matches(p) {
-  if (state.tab === 'airdrop' && !p.isAirdrop) return false;
+  if (state.tab === 'airdrop' && !(p.isAirdrop && !p.ended)) return false;
+  if (state.tab === 'ended' && !p.ended) return false;
   if (state.tab === 'project' && !(p.tags && p.tags.length)) return false;
   if (state.tag && !(p.tags || []).includes(state.tag)) return false;
   if (state.query) {
@@ -46,12 +47,20 @@ function rowHTML(p) {
   const tags = (p.tags || []).slice(0, 3);
   const links = (p.links || []).slice(0, 3);
   const isOpen = expanded.has(p.id);
+  const ended = p.ended || /تمام (?:شد|شده)|پایان (?:یافت|گرفت)|منقضی|تعطیل/.test(p.text || '');
   const cls = [
     'row',
-    p.isAirdrop ? 'is-airdrop' : '',
-    /تمام|پایان|تعطیل/.test(p.text || '') ? 'is-ended' : '',
+    p.isAirdrop && !ended ? 'is-airdrop' : '',
+    ended ? 'is-ended' : '',
+    p.category === 'alert' ? 'is-alert' : '',
     isOpen ? 'is-open' : ''
   ].filter(Boolean).join(' ');
+
+  const badge = ended ? '<span class="row__badge is-ended">پایان یافته</span>'
+    : p.category === 'alert' ? '<span class="row__badge is-alert">هشدار</span>'
+    : p.category === 'news' ? '<span class="row__badge is-news">خبر</span>'
+    : p.category === 'task' ? '<span class="row__badge">تسک</span>'
+    : p.isAirdrop ? '<span class="row__badge">ایردراپ</span>' : '';
 
   return `<div class="${cls}" data-id="${esc(p.id)}">
     <button class="row__head" type="button" aria-expanded="${isOpen}">
@@ -64,7 +73,7 @@ function rowHTML(p) {
         </span>
       </span>
       <span class="row__end">
-        ${p.isAirdrop ? '<span class="row__badge">ایردراپ</span>' : ''}
+        ${badge}
         <span class="row__views">${p.views ? '👁 ' + esc(p.views) : ''}</span>
         <span class="row__chev">⌄</span>
       </span>
@@ -174,26 +183,35 @@ el('boardList').addEventListener('click', (e) => {
 /* ---------- آمار ---------- */
 let liveStats = { subscribers: 0, members: 0, online: 0 };
 function renderStats(s) {
+  const fmt = (v) => v.toLocaleString('fa-IR');
   const set = (id, v) => {
     const n = el(id);
     if (!n) return;
-    const target = +v || 0;
-    if (n._first === undefined) {
+    const target = Number(v) || 0;
+    if (n._shown === target) return;
+
+    // یک بار شمارش هنگام بارگذاری اول؛ بعد از آن عدد مستقیم و بدون پرش آپدیت میشود
+    if (n._first === undefined || reduceMotion) {
       n._first = false;
-      n.textContent = target.toLocaleString('fa-IR');
+      clearInterval(n._t);
+      if (reduceMotion) { n._shown = target; n.textContent = fmt(target); return; }
+      const from = 0;
+      const steps = 26;
+      let i = 0;
+      n._shown = from;
+      n._t = setInterval(() => {
+        i++;
+        const val = Math.round(from + (target - from) * (i / steps));
+        n._shown = val;
+        n.textContent = fmt(val);
+        if (i >= steps) { clearInterval(n._t); n._shown = target; n.textContent = fmt(target); }
+      }, 24);
       return;
     }
-    let cur = +String(n.textContent).replace(/[^\d]/g, '') || 0;
-    if (cur === target) return;
-    const step = Math.max(1, Math.round(Math.abs(target - cur) / 30));
+
     clearInterval(n._t);
-    n._t = setInterval(() => {
-      cur += cur < target ? step : -step;
-      if ((cur < target && cur >= target) || (cur > target && cur <= target)) {
-        cur = target; clearInterval(n._t);
-      }
-      n.textContent = cur.toLocaleString('fa-IR');
-    }, 25);
+    n._shown = target;
+    n.textContent = fmt(target);
   };
   set('statSubs', s.subscribers);
   set('statMembers', s.members);
@@ -230,9 +248,11 @@ async function loadRates() {
     setChg('rateBtcChg', p.btc?.change);
     setChg('rateEthChg', p.eth?.change);
 
-    el('ratesTime').textContent = d.marketTime
-      ? `بازار: ${d.marketDate} · ${d.marketTime}${d.stale ? ' · تأخیر' : ''}`
-      : (d.stale ? 'نرخ با تأخیر' : '');
+    const timeBox = el('ratesTime');
+    el('ratesDate').textContent = d.marketDate || '—';
+    el('ratesClock').textContent = d.marketTime || '—';
+    el('ratesStale').hidden = !d.stale;
+    timeBox.hidden = false;
     el('rates').hidden = false;
   } catch {
     // منبع در دسترس نیست: نوار مخفی میشود، عدد جعلی نشان داده نمیشود
@@ -344,13 +364,100 @@ const SUB_KEY = 'bd_subscribed';
 /* ---------- عمومی ---------- */
 el('year').textContent = new Date().getFullYear();
 
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* منوی موبایل (با انیمیشن تبدیل به X و وضعیت دسترسپذیری) */
 const burger = el('burger');
 const links = el('navLinks');
-burger.addEventListener('click', () => links.classList.toggle('is-open'));
-links.addEventListener('click', e => { if (e.target.tagName === 'A') links.classList.remove('is-open'); });
+function closeMenu() {
+  links.classList.remove('is-open');
+  burger.classList.remove('is-open');
+  burger.setAttribute('aria-expanded', 'false');
+}
+burger.addEventListener('click', () => {
+  const open = links.classList.toggle('is-open');
+  burger.classList.toggle('is-open', open);
+  burger.setAttribute('aria-expanded', String(open));
+});
+links.addEventListener('click', e => { if (e.target.tagName === 'A') closeMenu(); });
+addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
 
+/* نوار پیشروی + دکمه برگشت به بالا + حالت چسبنده ناو */
 const nav = el('nav');
-addEventListener('scroll', () => nav.classList.toggle('is-sticky', scrollY > 20));
+const progress = el('progress');
+const toTop = el('toTop');
+let ticking = false;
+function onScroll() {
+  if (ticking) return;
+  ticking = true;
+  requestAnimationFrame(() => {
+    const max = document.documentElement.scrollHeight - innerHeight;
+    const p = max > 0 ? Math.min(1, Math.max(0, scrollY / max)) : 0;
+    if (progress) progress.style.transform = `scaleX(${p})`;
+    nav.classList.toggle('is-sticky', scrollY > 20);
+    if (toTop) toTop.classList.toggle('is-visible', scrollY > 500);
+    ticking = false;
+  });
+}
+addEventListener('scroll', onScroll, { passive: true });
+onScroll();
+if (toTop) toTop.addEventListener('click', () =>
+  scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' }));
+
+/* ظاهر شدن تدریجی المانها هنگام اسکرول */
+if (!reduceMotion && 'IntersectionObserver' in window) {
+  const targets = [...document.querySelectorAll(
+    '.hero__copy > *, .hero__panel, .rates, .board-toolbar, .list-meta, .sub, .faq__item, .footer__inner'
+  )];
+  const io = new IntersectionObserver((entries, obs) => {
+    for (const en of entries) {
+      if (!en.isIntersecting) continue;
+      en.target.classList.add('is-visible');
+      obs.unobserve(en.target);
+    }
+  }, { threshold: .08, rootMargin: '0px 0px -6% 0px' });
+  targets.forEach((node, i) => {
+    node.style.setProperty('--d', `${Math.min(i, 6) * 65}ms`);
+    node.classList.add('reveal');
+    io.observe(node);
+  });
+}
+
+/* موج نور روی دکمهها */
+if (!reduceMotion) {
+  document.addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest('.btn');
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    const size = Math.max(r.width, r.height);
+    const span = document.createElement('span');
+    span.className = 'ripple';
+    span.style.width = span.style.height = size + 'px';
+    span.style.left = (e.clientX - r.left - size / 2) + 'px';
+    span.style.top = (e.clientY - r.top - size / 2) + 'px';
+    btn.appendChild(span);
+    setTimeout(() => span.remove(), 650);
+  });
+}
+
+/* هالهی نور که با حرکت ماوس دنبال میکند (فقط دستگاههای دارای ماوس) */
+const hero = document.querySelector('.hero');
+if (hero && !reduceMotion && matchMedia('(pointer:fine)').matches) {
+  let raf = 0;
+  hero.addEventListener('pointermove', (e) => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      const r = hero.getBoundingClientRect();
+      hero.style.setProperty('--mx', ((e.clientX - r.left) / r.width * 100).toFixed(1) + '%');
+      hero.style.setProperty('--my', ((e.clientY - r.top) / r.height * 100).toFixed(1) + '%');
+      raf = 0;
+    });
+  });
+  hero.addEventListener('pointerleave', () => {
+    hero.style.removeProperty('--mx');
+    hero.style.removeProperty('--my');
+  });
+}
 
 load();
 loadRates();
