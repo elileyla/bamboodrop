@@ -1,8 +1,10 @@
 const API = location.protocol === 'file:' ? null : (location.origin + '/api');
 
-/* ---------- داده‌های واقعی از سرور (تلگرام) ---------- */
-
-let liveStats = { subscribers: 0, members: 0, online: 0, posts: 0 };
+/* ---------- ابزارها ---------- */
+const el = (id) => document.getElementById(id);
+const esc = (s = '') => String(s).replace(/[&<>"']/g, c => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+}[c]));
 
 const fa = new Intl.RelativeTimeFormat('fa', { numeric: 'auto' });
 function timeAgo(iso) {
@@ -13,335 +15,183 @@ function timeAgo(iso) {
   return fa.format(-Math.round(s / 86400), 'day');
 }
 
-/* ---------- کارت پروژه‌ها: هدر = هشتگ، پست‌ها زیرش ---------- */
-
-const el = (id) => document.getElementById(id);
-const projGrid = el('projectGrid');
-const tagsFilter = el('tagsFilter');
-let activeTag = null;
-let allProjects = [];
-let firstPaint = true;
-const openTags = new Set();   // کارت‌هایی که کاربر باز کرده
-const seenPostIds = new Set(); // برای تشخیص پست تازه
-
-const POSTS_PER_CARD = 4;
-
-function postLine(x) {
-  const t = (x.text || '').replace(/\s+/g, ' ').trim();
-  const body = t.length > 110 ? t.slice(0, 110) + '…' : t;
-  return `<li class="pline">
-    <a class="pline__text" href="${esc(x.url)}" target="_blank" rel="noopener">${esc(body)}</a>
-    <span class="pline__meta">${timeAgo(x.date)}${x.views ? ` · 👁 ${esc(x.views)}` : ''}</span>
-  </li>`;
-}
-
-function projectHTML(p) {
-  const ended = p.status === 'ended';
-  const isOpen = openTags.has(p.slug);
-  const shown = isOpen ? p.posts : p.posts.slice(0, POSTS_PER_CARD);
-  const hidden = p.count - shown.length;
-
-  const status = ended
-    ? '<span class="badge badge--ended">تست‌نت تمام شد</span>'
-    : (p.drops > 0 ? '<span class="badge badge--new">ایردراپ فعال</span>'
-                   : '<span class="badge badge--ok">فعال</span>');
-
-  return `<article class="pcard${ended ? ' is-ended' : ''}" data-slug="${esc(p.slug)}" data-sig="${esc(projectSignature(p))}">
-    <header class="pcard__head">
-      <a class="pcard__tag" href="#projects">#${esc(p.tag)}</a>
-      <div class="pcard__head-meta">
-        ${status}
-        <span class="pcard__count">${p.count.toLocaleString('fa-IR')} پست</span>
-      </div>
-    </header>
-
-    <div class="pcard__posts">
-      ${p.count === 0
-        ? '<p class="pcard__none">هنوز پیامی برای این پروژه ثبت نشده</p>'
-        : shown.map(postLine).join('')}
-    </div>
-
-    ${hidden > 0 || isOpen
-      ? `<button class="pcard__more-btn" type="button">
-           ${isOpen
-             ? 'بستن'
-             : `نمایش ${Math.min(hidden, 30).toLocaleString('fa-IR')} پست دیگر`}
-           <span class="pcard__chev">⌄</span>
-         </button>`
-      : ''}
-
-    <a class="pcard__cta" href="${esc(p.link)}" target="_blank" rel="noopener nofollow">
-      ${ended ? 'مشاهده آرشیو کانال' : 'مشاهده پروژه'} <span>←</span>
-    </a>
-  </article>`;
-}
-
-// فقط کارت‌هایی که واقعاً تغییر کرده‌اند دوباره رندر می‌شوند
-// تا کارت‌های باز و اسکرول کاربر دست‌نخورده بمانند
-function projectSignature(p) {
-  return `${p.slug}|${p.count}|${p.drops}|${p.status}`;
-}
-
-function renderProjects(projects, isRefresh) {
-  if (!projects?.length) {
-    projGrid.innerHTML = '<p class="empty">هنوز پروژه‌ای با هشتگ پیدا نشد.</p>';
-    tagsFilter.innerHTML = '';
-    return;
-  }
-
-  if (isRefresh) {
-    // حالت تازه‌سازی: فقط کارت‌های تغییرکرده را عوض کن
-    const existing = new Map(
-      [...projGrid.querySelectorAll('.pcard')].map(c => [c.dataset.slug, c])
-    );
-    let touched = 0;
-    for (const p of projects) {
-      const card = existing.get(p.slug);
-      if (!card) continue;
-      if (card.dataset.sig !== projectSignature(p)) {
-        card.outerHTML = projectHTML(p);
-        touched++;
-      }
-    }
-    // کارت‌های جدید (پروژه‌ی تازه) اضافه می‌شوند
-    const known = new Set(projects.map(p => p.slug));
-    const added = projects.filter(p => !existing.has(p.slug));
-    if (added.length) {
-      projGrid.insertAdjacentHTML('beforeend', added.map(projectHTML).join(''));
-    }
-    // کارت‌هایی که دیگر وجود ندارند حذف می‌شوند
-    for (const [slug, card] of existing) {
-      if (!known.has(slug)) card.remove();
-    }
-    if (touched || added.length) markNewCards(projects);
-    return;
-  }
-
-  // رندر اولیه
-  projGrid.innerHTML = projects.map(projectHTML).join('');
-
-  tagsFilter.innerHTML = `<button class="tfilter is-active" data-tag="">همه (${projects.length})</button>`
-    + projects.map(p => `<button class="tfilter${p.status === 'ended' ? ' is-ended' : ''}" data-tag="${esc(p.slug)}">#${esc(p.tag)}</button>`).join('');
-
-  markNewCards(projects);
-  document.querySelectorAll('.card').forEach(n => io.observe(n));
-}
-
-// پست تازه = پستی که در بار اول ندیده بودیم
-function markNewCards(projects) {
-  let fresh = 0;
-  for (const p of projects) {
-    for (const x of p.posts) {
-      x.justNew = !seenPostIds.has(x.id);
-      if (x.justNew) { seenPostIds.add(x.id); fresh++; }
-    }
-  }
-  // بار اول: همه‌چیز «تازه» است ولی نباید هایلایت شود
-  if (firstPaint) { firstPaint = false; return; }
-  if (!fresh) return;
-
-  for (const p of projects) {
-    const card = projGrid.querySelector(`.pcard[data-slug="${CSS.escape(p.slug)}"]`);
-    const hasNewPost = p.posts.some(x => x.justNew);
-    if (!card || !hasNewPost) continue;
-    card.classList.add('has-new');
-    card.querySelector('.pcard__head')?.classList.add('has-new');
-    setTimeout(() => {
-      card.classList.remove('has-new');
-      card.querySelector('.pcard__head')?.classList.remove('has-new');
-    }, 12000);
-  }
-}
-
-// باز/بسته کردن پیام‌های هر کارت
-projGrid.addEventListener('click', (e) => {
-  const btn = e.target.closest('.pcard__more-btn');
-  if (!btn) return;
-  const slug = btn.closest('.pcard')?.dataset.slug;
-  if (!slug) return;
-
-  if (openTags.has(slug)) openTags.delete(slug);
-  else openTags.add(slug);
-
-  const p = allProjects.find(x => x.slug === slug);
-  if (!p) return;
-  // فقط همان کارت را دوباره رندر می‌کنیم
-  const card = projGrid.querySelector(`.pcard[data-slug="${CSS.escape(slug)}"]`);
-  if (card) card.outerHTML = projectHTML(p);
-});
-
-// کلیک روی هشتگ = فیلتر همان پروژه
-projGrid.addEventListener('click', (e) => {
-  const tag = e.target.closest('.pcard__tag');
-  if (!tag) return;
-  const slug = tag.closest('.pcard')?.dataset.slug;
-  const btn = tagsFilter.querySelector(`.tfilter[data-tag="${CSS.escape(slug || '')}"]`);
-  if (btn) btn.click();
-});
-
-// فیلتر بر اساس هشتگ
-tagsFilter.addEventListener('click', (e) => {
-  const btn = e.target.closest('.tfilter');
-  if (!btn) return;
-  activeTag = btn.dataset.tag || null;
-  document.querySelectorAll('.tfilter').forEach(b => b.classList.toggle('is-active', b === btn));
-  applyFilter();
-});
-
-function applyFilter() {
-  const list = activeTag ? allProjects.filter(p => p.slug === activeTag) : allProjects;
-  projGrid.innerHTML = list.map(projectHTML).join('');
-  if (activeTag) {
-    const first = projGrid.querySelector('.pcard');
-    if (first) first.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-}
-
-const grid = el('dropGrid');
-const feedList = el('feedList');
-const faqList = el('faqList');
-
-/* ---------- چت تصویری با استیکرها ---------- */
-
-// استیکرهای پک اختصاصی بامبو دراپ — بر اساس موضوع پیام انتخاب می‌شوند
-const STICKERS = [
-  '01_01_channel_check_angry.webp',
-  '02_02_nostradamus_smug.webp',
-  '03_03_not_checking_surprised.webp',
-  '04_04_be_like_bamboo_thinking.webp',
-  '05_05_project_hashtag_bored.webp',
-  '06_06_irancell_angry.webp',
-  '07_07_listen_my_child_advice.webp',
-  '08_08_fifo_mysterious.webp',
-  '09_09_power_cut_angry.webp',
-  '10_10_net_cut_cursing.webp',
-  '11_11_why_no_channel_tired.webp',
-  '12_12_do_your_tasks_bossy.webp'
-];
-const STICKER_BASE = '/stickers/';
-
-// انتخاب استیکر بر اساس محتوای پیام تا حس «نظر ادمین» بدهد
-const STICKER_RULES = [
-  { re: /هک|جعلی|کلاهبردار|فیشینگ|اسکم|مراقب/i, i: 0 },
-  { re: /چشم|بینی|نظر|حدس|میدونی|شاید|احتمال/i, i: 1 },
-  { re: /غافلگیر|سورپرایز|واقعا|جدید|finally/i, i: 2 },
-  { re: /چرا|چطور|چیست|یعنی چی/i, i: 3 },
-  { re: /هشتگ|#\w+|پروژه/i, i: 4 },
-  { re: /اینترنت|نت|مودم|قطع|تاخیر|کند/i, i: 5 },
-  { re: /گوش بده|بشنو|توجه|نکته/i, i: 6 },
-  { re: /پیشنهاد|فرصت|شانس/i, i: 7 },
-  { re: /برق|قطعی|نور|انرژی/i, i: 8 },
-  { re: /عصب|عصبی|مسخره|宰|خر/i, i: 9 },
-  { re: /کانال|عضو|دنبال|فالو/i, i: 10 },
-  { re: /تسک|ایردراپ|انجام|بزن|کلیم/i, i: 11 }
-];
-
-function pickSticker(text) {
-  for (const r of STICKER_RULES) if (r.re.test(text)) return STICKER_BASE + STICKERS[r.i];
-  return null;
-}
-
 function hostOf(u) {
   try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return String(u).slice(0, 26); }
 }
 
-function chatHTML(p) {
-  const text = p.text || '';
-  const sticker = pickSticker(text);
-  const links = (p.links || []).slice(0, 3);
-
-  const media = sticker
-    ? `<div class="bubble bubble--media">
-         <img src="${esc(sticker)}" alt="" loading="lazy" decoding="async"
-              onclick="window.__bdZoom(this.src)" />
-         ${text ? `<div class="bubble__caption">${esc(text.length > 150 ? text.slice(0, 150) + '…' : text)}</div>` : ''}
-       </div>`
-    : `<div class="bubble">${esc(text || '(پیام بدون متن)')}</div>`;
-
-  return `<article class="msg" data-id="${esc(p.id)}">
-    <a class="msg__av" href="https://t.me/${esc(String(p.post).split('/')[0])}" target="_blank" rel="noopener"
-       aria-label="کانال BambooDrop">B</a>
-    <div class="msg__body">
-      <div class="msg__head">
-        <a class="msg__author" href="https://t.me/${esc(String(p.post).split('/')[0])}" target="_blank" rel="noopener">BambooDrop</a>
-        <a class="msg__time" href="${esc(p.url)}" target="_blank" rel="noopener" title="${esc(p.date || '')}">${timeAgo(p.date)}</a>
-      </div>
-      ${media}
-      ${links.length ? `<div class="bubble__links">${links.map(u =>
-        `<a class="bubble__link" href="${esc(u)}" target="_blank" rel="noopener nofollow">↗ ${esc(hostOf(u))}</a>`).join('')}</div>` : ''}
-      <div class="bubble__foot">
-        <a href="${esc(p.url)}" target="_blank" rel="noopener">مشاهده در تلگرام</a>
-        ${p.views ? `<span>👁 ${esc(p.views)}</span>` : ''}
-      </div>
-    </div>
-  </article>`;
+function firstLine(text) {
+  // خطوطی که فقط هشتگاند رد کن تا عنوان، متن واقعی پیام باشد
+  const line = String(text || '').split('\n').map(s => s.trim())
+    .find(s => s && !/^#[\w-]+$/.test(s)) || '(پیام بدون متن)';
+  return line.length > 90 ? line.slice(0, 90) + '…' : line;
 }
 
-let firstRender = true;
-function renderFeed(posts) {
-  const box = el('feedList');
-  if (!posts?.length) {
-    box.innerHTML = '<p class="empty">هنوز پیامی برای نمایش نیست.</p>';
+/* ---------- 상태 لیست واحد ---------- */
+let allPosts = [];
+let state = { tab: 'all', query: '', tag: '' };
+const expanded = new Set();
+
+function matches(p) {
+  if (state.tab === 'airdrop' && !p.isAirdrop) return false;
+  if (state.tab === 'project' && !(p.tags && p.tags.length)) return false;
+  if (state.tag && !(p.tags || []).includes(state.tag)) return false;
+  if (state.query) {
+    const hay = String(p.text + ' ' + (p.tags || []).join(' ')).toLowerCase();
+    if (!hay.includes(state.query)) return false;
+  }
+  return true;
+}
+
+function rowHTML(p) {
+  const tags = (p.tags || []).slice(0, 3);
+  const links = (p.links || []).slice(0, 3);
+  const isOpen = expanded.has(p.id);
+  const cls = [
+    'row',
+    p.isAirdrop ? 'is-airdrop' : '',
+    /تمام|پایان|تعطیل/.test(p.text || '') ? 'is-ended' : '',
+    isOpen ? 'is-open' : ''
+  ].filter(Boolean).join(' ');
+
+  return `<div class="${cls}" data-id="${esc(p.id)}">
+    <button class="row__head" type="button" aria-expanded="${isOpen}">
+      <span class="row__dot"></span>
+      <span class="row__main">
+        <span class="row__title">${esc(firstLine(p.text))}</span>
+        <span class="row__sub">
+          ${tags.map(t => `<span class="hash">#${esc(t)}</span>`).join(' · ')}
+          ${tags.length ? ' · ' : ''}${timeAgo(p.date)}
+        </span>
+      </span>
+      <span class="row__end">
+        ${p.isAirdrop ? '<span class="row__badge">ایردراپ</span>' : ''}
+        <span class="row__views">${p.views ? '👁 ' + esc(p.views) : ''}</span>
+        <span class="row__chev">⌄</span>
+      </span>
+    </button>
+    <div class="row__detail">
+      <div class="detail__text">${esc(p.text || '')}</div>
+      ${links.length ? `<div class="detail__links">${links.map(u =>
+        `<a class="detail__link" href="${esc(u)}" target="_blank" rel="noopener nofollow">↗ ${esc(hostOf(u))}</a>`
+      ).join('')}</div>` : ''}
+      <div class="detail__foot">
+        <a href="${esc(p.url)}" target="_blank" rel="noopener">مشاهده در تلگرام ←</a>
+      </div>
+    </div>
+  </div>`;
+}
+
+function paintList() {
+  const box = el('boardList');
+  const list = allPosts.filter(matches);
+  const count = el('listCount');
+  if (count) count.innerHTML = `<b>${list.length.toLocaleString('fa-IR')}</b> پیام`;
+
+  if (!list.length) {
+    box.innerHTML = '<p class="empty">پیامی با این فیلتر پیدا نشد. جستجو یا فیلتر رو پاک کن.</p>';
     return;
   }
-  const list = posts.slice(0, 20).reverse();   // جدیدترین پایین، مثل چت
-  const hasNew = !firstRender && el('feedList').dataset.first !== posts[0].id;
 
-  box.innerHTML = list.map(chatHTML).join('')
-    + '<p class="feed__more"><a href="https://t.me/Bamboodrop" target="_blank" rel="noopener">دیدن همه در کانال ←</a></p>';
+  // فقط ردیفهایی که محتوایشان تغییر کرده آپدیت میشوند تا جزئیات باز و اسکرول حفظ شود
+  const existing = new Map(
+    [...box.querySelectorAll('.row')].map(r => [r.dataset.id, r])
+  );
+  const ids = new Set(list.map(p => p.id));
 
-  box.dataset.first = posts[0].id;
-  firstRender = false;
-
-  if (hasNew) {
-    box.querySelector('.msg:last-of-type')?.classList.add('is-new');
-    el('newBadge')?.classList.add('is-show');
+  for (const p of list) {
+    const html = rowHTML(p);
+    const row = existing.get(p.id);
+    if (!row) continue;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    const fresh = tmp.firstElementChild;
+    if (row.outerHTML !== fresh.outerHTML) row.replaceWith(fresh);
   }
-  // اسکرول به آخرین پیام
-  requestAnimationFrame(() => { box.scrollTop = box.scrollHeight; });
+
+  // وقتی تب/فیلتر عوض شده، لیست کاملاً بازسازی میشود
+  const currentIds = [...box.querySelectorAll('.row')].map(r => r.dataset.id);
+  const sameSet = currentIds.length === ids.size && currentIds.every(id => ids.has(id));
+  if (!sameSet) {
+    box.innerHTML = list.map(rowHTML).join('');
+    return;
+  }
+
+  for (const [id, row] of existing) if (!ids.has(id)) row.remove();
+  const added = list.filter(p => !existing.has(p.id));
+  if (added.length) box.insertAdjacentHTML('afterbegin', added.map(rowHTML).join(''));
 }
 
-const FAQ = [
-  ["آیا رایگان است؟", "بله. بامبو دراپ هیچ هزینه‌ای دریافت نمی‌کنه و فقط ایردراپ‌های مناسب رو معرفی می‌کنه."],
-  ["آیا کیف پول لازم دارم؟", "برای تسک‌های Testnet معمولاً یه کیف پول رایگان مثل MetaMask کافیه. برای ایردراپ‌های شبکه اصلی مقدار کمی فی لازم می‌شه."],
-  ["اطلاعات کیف پولم امن می‌مونه؟", "ما هیچ‌وقت seed phrase یا کلید خصوصی شما رو نمی‌خوایم. هیچ سایتی جز سایت رسمی پروژه رو تأیید نمی‌کنیم."],
-  ["چطور می‌تونم کمک کنم؟", "توی گروه گفتگو تجربه‌ت رو بگو یا ادمین @Bamboodrop00 رو پیام بده."],
-  ["سواستم رو جواب ندادند چیکار کنم؟", "سوالت رو با جزئیات کامل (اسم پروژه و کاری که کردی) توی گروه بذار؛ معمولاً سریع پاسخ داده می‌شه."],
-  ["محتوای سایت چقدر تازه‌ست؟", "این صفحه مستقیم از کانال تلگرام خوانده می‌شه و هر یک دقیقه به‌روزرسانی می‌شه."]
-];
+function initToolbar() {
+  const tabs = el('tabs');
+  const search = el('boardSearch');
+  const tagSel = el('boardTag');
 
-function cardHTML(d) {
-  return `<article class="card">
-    <div class="card__top">
-      <h3>${esc(d.title)}</h3>
-      <span class="badge ${d.status === 'جدید' ? 'badge--new' : 'badge--ok'}">${esc(d.status)}</span>
-    </div>
-    <p class="card__desc">${esc(d.desc)}</p>
-    <ul class="card__meta">
-      <li><span>شبکه</span><b>${esc(d.network)}</b></li>
-      <li><span>بازدید</span><b>${esc(d.views || '—')}</b></li>
-      <li><span>زمان</span><b>${timeAgo(d.date)}</b></li>
-    </ul>
-    <a class="card__cta" href="${esc(d.link)}" target="_blank" rel="noopener nofollow">مشاهده پروژه ←</a>
-    <a class="card__src" href="${esc(d.channelUrl)}" target="_blank" rel="noopener">منبع: کانال</a>
-  </article>`;
+  // event listener ها فقط یک بار بسته میشوند (تازهسازی هر دقیقه نباید تکثیرشان کند)
+  if (!tabs.dataset.bound) {
+    tabs.dataset.bound = '1';
+
+    tabs.addEventListener('click', (e) => {
+      const btn = e.target.closest('.tab');
+      if (!btn) return;
+      state.tab = btn.dataset.tab;
+      tabs.querySelectorAll('.tab').forEach(b => {
+        const on = b === btn;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-selected', on);
+      });
+      paintList();
+    });
+
+    search.addEventListener('input', () => {
+      state.query = search.value.trim().toLowerCase();
+      paintList();
+    });
+
+    tagSel.addEventListener('change', () => { state.tag = tagSel.value; paintList(); });
+  }
+
+  // پر کردن فیلتر هشتگ از دادههای واقعی، با حفظ انتخاب کاربر
+  const tags = [...new Set(allPosts.flatMap(p => p.tags || []))].sort();
+  const current = tagSel.value;
+  tagSel.innerHTML = '<option value="">همه پروژهها</option>'
+    + tags.map(t => `<option value="${esc(t)}">#${esc(t)}</option>`).join('');
+  if (tags.includes(current)) tagSel.value = current;
+  else if (current) { state.tag = ''; tagSel.value = ''; }
 }
 
-function esc(s = '') {
-  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
+// باز/بسته شدن جزئیات (کلیک روی لینک داخل جزئیات نباید ردیف رو ببندد)
+el('boardList').addEventListener('click', (e) => {
+  if (e.target.closest('a')) return;
+  const head = e.target.closest('.row__head');
+  if (!head) return;
+  const row = head.closest('.row');
+  const id = row.dataset.id;
+  if (expanded.has(id)) expanded.delete(id); else expanded.add(id);
+  row.classList.toggle('is-open');
+  head.setAttribute('aria-expanded', expanded.has(id));
+});
 
+/* ---------- آمار ---------- */
+let liveStats = { subscribers: 0, members: 0, online: 0 };
 function renderStats(s) {
   const set = (id, v) => {
     const n = el(id);
     if (!n) return;
     const target = +v || 0;
-    let cur = 0;
-    const step = Math.max(1, Math.round(target / 40));
+    if (n._first === undefined) {
+      n._first = false;
+      n.textContent = target.toLocaleString('fa-IR');
+      return;
+    }
+    let cur = +String(n.textContent).replace(/[^\d]/g, '') || 0;
+    if (cur === target) return;
+    const step = Math.max(1, Math.round(Math.abs(target - cur) / 30));
     clearInterval(n._t);
     n._t = setInterval(() => {
-      cur += step;
-      if (cur >= target) { cur = target; clearInterval(n._t); }
+      cur += cur < target ? step : -step;
+      if ((cur < target && cur >= target) || (cur > target && cur <= target)) {
+        cur = target; clearInterval(n._t);
+      }
       n.textContent = cur.toLocaleString('fa-IR');
     }, 25);
   };
@@ -350,9 +200,50 @@ function renderStats(s) {
   set('statOnline', s.online);
 }
 
+/* ---------- نوار نرخ ---------- */
+const nf = new Intl.NumberFormat('fa-IR');
+function fmtChange(v) {
+  if (v == null || !Number.isFinite(+v)) return '';
+  const n = +v;
+  return `${n > 0 ? '+' : ''}${nf.format(+n.toFixed(2))}٪`;
+}
+
+async function loadRates() {
+  if (!API) return;
+  try {
+    const r = await fetch(`${API}/prices`, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const p = d.prices || {};
+    if (!p.usdt?.irr) throw new Error('no data');
+
+    el('rateUsdt').textContent = nf.format(p.usdt.irr);
+    el('rateBtc').textContent = p.btc?.usdt ? nf.format(p.btc.usdt) : '—';
+    el('rateEth').textContent = p.eth?.usdt ? nf.format(p.eth.usdt) : '—';
+
+    const setChg = (id, v) => {
+      const n = el(id);
+      n.textContent = fmtChange(v);
+      n.className = 'rates__change' + (v > 0 ? ' up' : v < 0 ? ' down' : '');
+    };
+    setChg('rateUsdtChg', p.usdt.change);
+    setChg('rateBtcChg', p.btc?.change);
+    setChg('rateEthChg', p.eth?.change);
+
+    el('ratesTime').textContent = d.marketTime
+      ? `بازار: ${d.marketDate} · ${d.marketTime}${d.stale ? ' · تأخیر' : ''}`
+      : (d.stale ? 'نرخ با تأخیر' : '');
+    el('rates').hidden = false;
+  } catch {
+    // منبع در دسترس نیست: نوار مخفی میشود، عدد جعلی نشان داده نمیشود
+    el('rates').hidden = true;
+  }
+}
+
+/* ---------- بارگذاری ---------- */
 async function load() {
   if (!API) {
-    grid.innerHTML = '<p class="empty">برای دیدن داده‌های زنده، سایت را با <code>npm run dev</code> اجرا کنید.</p>';
+    el('boardList').innerHTML = '<p class="empty">برای دیدن دادههای زنده، سایت رو با <code>npm run dev</code> اجرا کن.</p>';
     return;
   }
   try {
@@ -368,29 +259,33 @@ async function load() {
     el('updatedAt').textContent = timeAgo(d.updatedAt);
     document.body.classList.toggle('is-stale', !!d.stale);
 
-    grid.innerHTML = d.drops?.length
-      ? d.drops.map(cardHTML).join('')
-      : '<p class="empty">در حال حاضر ایردراپ فعالی ثبت نشده. کانال را دنبال کنید.</p>';
-
-    renderFeed(d.posts);
-
-    allProjects = d.projects || [];
-    // بار اول کامل رندر می‌شود، بعد فقط تغییرات
-    renderProjects(allProjects, firstPaint ? false : true);
-
-    document.querySelectorAll('.card, .step, .faq__item').forEach(n => io.observe(n));
+    allPosts = d.posts || [];
+    initToolbar();
+    paintList();
   } catch (e) {
-    grid.innerHTML = '<p class="empty">دریافت اطلاعات ممکن نشد. لطفاً کانال تلگرام را ببینید.</p>'
+    el('boardList').innerHTML = '<p class="empty">دریافت اطلاعات ممکن نشد. کانال تلگرام رو ببینید.</p>'
       + '<p class="empty"><a href="https://t.me/Bamboodrop" target="_blank" rel="noopener">@Bamboodrop</a></p>';
+    const count = el('listCount');
+    if (count) count.textContent = '';
   }
 }
 
+/* ---------- FAQ ---------- */
+const FAQ = [
+  ["آیا رایگان است؟", "بله. بامبو دراپ هیچ هزینهای دریافت نمیکنه و فقط ایردراپهای مناسب رو معرفی میکنه."],
+  ["آیا کیف پول لازم دارم؟", "برای تسکهای Testnet معمولاً یه کیف پول رایگان مثل MetaMask کافیه. برای ایردراپهای شبکه اصلی مقدار کمی فی لازم میشه."],
+  ["اطلاعات کیف پولم امن میمونه؟", "ما هیچوقت seed phrase یا کلید خصوصی شما رو نمیخوایم. هیچ سایتی جز سایت رسمی پروژه رو تأیید نمیکنیم."],
+  ["چطور میتونم کمک کنم؟", "توی گروه گفتگو تجربهت رو بگو یا ادمین @Bamboodrop00 رو پیام بده."],
+  ["سوالم رو جواب ندادند چیکار کنم؟", "سؤالت رو با جزئیات کامل (اسم پروژه و کاری که کردی) توی گروه بذار؛ معمولاً سریع پاسخ داده میشه."],
+  ["محتوای سایت چقدر تازهست؟", "این صفحه مستقیم از کانال تلگرام خوانده میشه و هر یک دقیقه بهروزرسانی میشه."]
+];
+
+const faqList = el('faqList');
 faqList.innerHTML = FAQ.map(([q, a], i) => `
   <div class="faq__item ${i === 0 ? 'is-open' : ''}">
     <button class="faq__q" aria-expanded="${i === 0}">${esc(q)}<span class="chev">⌄</span></button>
     <div class="faq__a"><p>${esc(a)}</p></div>
   </div>`).join('');
-
 
 faqList.addEventListener('click', e => {
   const btn = e.target.closest('.faq__q');
@@ -400,31 +295,9 @@ faqList.addEventListener('click', e => {
   btn.setAttribute('aria-expanded', open);
 });
 
-// ── بزرگ‌نمایی تصویر (لایت‌باک ساده) ─────────────────────
-window.__bdZoom = (src) => {
-  let ov = document.getElementById('bdOv');
-  if (!ov) {
-    ov = document.createElement('div');
-    ov.id = 'bdOv';
-    ov.className = 'lightbox';
-    ov.innerHTML = '<img alt="" /><button type="button" aria-label="بستن">✕</button>';
-    document.body.appendChild(ov);
-    ov.addEventListener('click', (e) => {
-      if (e.target.tagName === 'IMG') return;
-      ov.classList.remove('is-open');
-    });
-    addEventListener('keydown', (e) => { if (e.key === 'Escape') ov.classList.remove('is-open'); });
-  }
-  ov.querySelector('img').src = src;
-  ov.classList.add('is-open');
-};
-
-// ── ثبت‌نام خبرنامه ─────────────────────────────────────
-// بدون بک‌اند، ایمیل فقط در مرورگر ذخیره می‌شود (localStorage).
-// برای ذخیره‌ی واقعی سمت سرور باید /api/subscribe ساخته شود.
+/* ---------- ثبتنام خبرنامه ---------- */
 const SUB_KEY = 'bd_subscribed';
-
-function initSubscribe() {
+(function initSubscribe() {
   const form = el('subForm'), input = el('subEmail'), msg = el('subMsg'), btn = el('subBtn');
   if (!form) return;
 
@@ -439,34 +312,26 @@ function initSubscribe() {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = input.value.trim();
-
     if (!/^[^\s@<>()[\]\\,;:"]+@[^\s@<>()[\]\\,;:"\s]+\.[^\s@<>()[\]\\,;:"\s]{2,}$/.test(email)) {
       msg.className = 'sub__msg err';
       msg.textContent = 'لطفاً یک ایمیل معتبر وارد کنید.';
       return;
     }
-
     btn.disabled = true;
-    const old = btn.textContent;
     btn.textContent = 'در حال ثبت…';
-
     try {
       let saved = false;
       if (API) {
-        // اگر بعداً /api/subscribe ساخته شد، اینجا واقعاً ثبت می‌شود
         const r = await fetch(`${API}/subscribe`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email })
         });
         saved = r.ok;
       }
-      if (!saved) { localStorage.setItem(SUB_KEY, email); }
-
-      localStorage.setItem(SUB_KEY, email);
+      if (!saved) localStorage.setItem(SUB_KEY, email);
       btn.textContent = 'ثبت شده ✓';
       msg.className = 'sub__msg ok';
-      msg.textContent = 'ثبت شد! ایمیل جدیدترین ایردراپ‌ها را برایت می‌فرستیم.';
+      msg.textContent = 'ثبت شد! ایمیل جدیدترین ایردراپها رو برات میفرستیم.';
     } catch {
       localStorage.setItem(SUB_KEY, email);
       btn.textContent = 'ثبت شده ✓';
@@ -474,55 +339,20 @@ function initSubscribe() {
       msg.textContent = 'ثبت شد (حالت آفلاین).';
     }
   });
-}
+})();
 
-// ── اشتراک‌گذاری ─────────────────────────────────────────
-function initShare() {
-  const btn = el('shareBtn');
-  if (!btn) return;
-  btn.addEventListener('click', async () => {
-    const data = { title: document.title, text: 'بامبو دراپ — جدیدترین ایردراپ‌ها', url: location.href };
-    if (navigator.share) {
-      try { await navigator.share(data); return; } catch { /* کاربر لغو کرد */ }
-    }
-    try {
-      await navigator.clipboard.writeText(location.href);
-      const old = btn.textContent;
-      btn.textContent = '✓ لینک کپی شد';
-      setTimeout(() => (btn.textContent = old), 2200);
-    } catch {
-      window.open('https://t.me/share/url?url=' + encodeURIComponent(location.href)
-        + '&text=' + encodeURIComponent(data.text), '_blank', 'noopener');
-    }
-  });
-}
-
+/* ---------- عمومی ---------- */
 el('year').textContent = new Date().getFullYear();
 
-// منوی موبایل
 const burger = el('burger');
 const links = el('navLinks');
 burger.addEventListener('click', () => links.classList.toggle('is-open'));
 links.addEventListener('click', e => { if (e.target.tagName === 'A') links.classList.remove('is-open'); });
 
-// نوار بالا هنگام اسکرول
 const nav = el('nav');
 addEventListener('scroll', () => nav.classList.toggle('is-sticky', scrollY > 20));
 
-// ریویل هنگام اسکرول
-const io = new IntersectionObserver(es => es.forEach(e => {
-  if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
-}), { threshold: .15 });
-document.querySelectorAll('.step, .faq__item').forEach(n => io.observe(n));
-
-// بارگذاری داده‌ی زنده + تازه‌سازی خودکار هر ۶۰ ثانیه
-initSubscribe();
-initShare();
 load();
-setInterval(() => {
-  load();
-  if (el('statOnline') && liveStats.online != null) el('statOnline').textContent = liveStats.online.toLocaleString('fa-IR');
-  // بَج «پیام جدید» بعد از ۱۰ ثانیه محو می‌شود
-  setTimeout(() => el('newBadge')?.classList.remove('is-show'), 10000);
-}, 60000);
-
+loadRates();
+setInterval(load, 60000);
+setInterval(loadRates, 60000);

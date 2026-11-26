@@ -56,6 +56,12 @@ const server = http.createServer(async (req, res) => {
       const d = await cached();
       return send(200, { updatedAt: d.updatedAt, channel: d.channel, group: d.group, stats: d.stats, stale: d.stale });
     }
+    if (url.pathname === '/api/prices') {
+      const { default: handler } = await import('./api/prices.js');
+      res.status = (c) => { res.statusCode = c; return res; };
+      res.json = (o) => send(res.statusCode || 200, o);
+      return handler({ method: req.method }, res);
+    }
     if (url.pathname === '/api/drops') {
       const d = await cached();
       return send(200, { updatedAt: d.updatedAt, drops: d.drops, stale: d.stale });
