@@ -21,24 +21,27 @@ body{
   font-family:var(--font-b);font-weight:400;background:var(--bg);color:var(--txt);
   line-height:1.7;text-align:start;overflow-x:hidden;-webkit-font-smoothing:antialiased;
 }
-/* post-production: aurora + fine grid */
+/* post-production: aurora + bamboo grove */
 body::before{
   content:'';position:fixed;inset:-20%;z-index:-2;pointer-events:none;
   background:
-    radial-gradient(ellipse 55% 40% at 82% -2%,rgba(var(--jade-rgb),.16),transparent 62%),
-    radial-gradient(ellipse 50% 38% at 8% 18%,rgba(18,160,106,.11),transparent 62%),
-    radial-gradient(ellipse 40% 30% at 50% 105%,rgba(46,230,160,.07),transparent 65%),
+    radial-gradient(ellipse 55% 40% at 82% -2%,rgba(var(--jade-rgb),.1),transparent 62%),
+    radial-gradient(ellipse 50% 38% at 8% 18%,rgba(18,160,106,.07),transparent 62%),
+    radial-gradient(ellipse 40% 30% at 50% 105%,rgba(46,230,160,.045),transparent 65%),
     linear-gradient(180deg,var(--bg),var(--bg-2) 45%,var(--bg));
-  animation:aurora 18s ease-in-out infinite alternate;
+  animation:aurora 22s ease-in-out infinite alternate;
 }
 body::after{
-  content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.35;
-  background-image:linear-gradient(rgba(255,255,255,.022) 1px,transparent 1px),
-                   linear-gradient(90deg,rgba(255,255,255,.022) 1px,transparent 1px);
-  background-size:56px 56px;
-  -webkit-mask-image:linear-gradient(180deg,#000,transparent 65%);
-  mask-image:linear-gradient(180deg,#000,transparent 65%);
+  content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.085;
+  background-image:url('/bamboo.svg');
+  background-repeat:repeat;
+  background-size:360px 360px;
+  background-position:center top;
+  -webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.75) 45%,transparent 88%);
+  mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.75) 45%,transparent 88%);
+  animation:bambooDrift 26s ease-in-out infinite alternate;
 }
+@keyframes bambooDrift{from{background-position:center top}to{background-position:center 26px}}
 @keyframes aurora{from{transform:translate3d(-1.5%,-1%,0) scale(1)}to{transform:translate3d(2%,1.5%,0) scale(1.06)}}
 a{color:inherit;text-decoration:none}
 ::selection{background:rgba(var(--jade-rgb),.3);color:#fff}
