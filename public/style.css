@@ -68,7 +68,7 @@ b,strong,.stat b{font-variant-numeric:tabular-nums}
 .nav__inner{display:flex;align-items:center;justify-content:space-between;padding:13px 0;gap:16px}
 .logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:1.05rem}
 .logo__avatar{width:34px;height:34px;border-radius:50%;object-fit:cover;flex-shrink:0;
-  border:1px solid var(--line-2);transition:transform .6s var(--ease),box-shadow .4s var(--ease)}
+  border:0;transition:transform .6s var(--ease),box-shadow .4s var(--ease)}
 .logo:hover .logo__avatar{transform:rotate(-12deg) scale(1.08);box-shadow:0 0 0 4px rgba(var(--jade-rgb),.12)}
 .logo__text{font-family:var(--font-d);font-size:1.45rem;line-height:1}
 .logo__text em{font-style:normal;background:linear-gradient(120deg,var(--jade),var(--lime));

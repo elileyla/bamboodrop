@@ -98,6 +98,7 @@ public/            فایل‌های استاتیک (آنچه Vercel سرو می
   style.css
   script.js
   bamboo.svg        الگوی بامبوی پسزمینه
+  favicon.svg       لوگوی بامبو بدون حاشیه سفید (تب مرورگر و ناو)
   stickers/        ۱۲ استیکر پک بامبو دراپ
   tokens/           لوگوهای USDT / BTC / ETH نوار نرخ
 lib/telegram.js    پارس کانال، طبقه‌بندی ایردراپ
